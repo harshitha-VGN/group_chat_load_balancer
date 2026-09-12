@@ -284,7 +284,7 @@ def generate_report_plots(results_dir: str = "plots"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Custom Load Generator for Dynamic Load Balancer")
-    parser.add_argument("--url", type=str, default="http://127.0.0.1:8080", help="Load Balancer URL")
+    parser.add_argument("--url", type=str, default="http://10.1.75.79:8245", help="Load Balancer URL")
     parser.add_argument("--users", type=int, default=15, help="Number of concurrent users")
     parser.add_argument("--messages", type=int, default=30, help="Messages per user")
     parser.add_argument("--min-len", type=int, default=10, help="Min message length")

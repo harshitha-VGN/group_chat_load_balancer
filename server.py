@@ -61,7 +61,7 @@ KEY_FILE = os.path.join(BASE_DIR, "secret.key")
 KEYS_DIR = os.path.join(BASE_DIR, "keys")
 os.makedirs(KEYS_DIR, exist_ok=True)
 
-CENTRAL_DB_URL = os.environ.get("CENTRAL_DB_URL", "").rstrip("/")
+CENTRAL_DB_URL = os.environ.get("CENTRAL_DB_URL", "http://10.1.75.79:5245").rstrip("/")
 
 # ─── In-Memory State ───
 connected_users: dict[str, dict] = {}        # sid -> {"username": str}

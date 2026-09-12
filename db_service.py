@@ -154,6 +154,6 @@ def get_signing_key(username: str):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("DB_PORT", 5001))
+    port = int(os.environ.get("DB_PORT", 5000))
     print(f"Starting Central DB Service on 0.0.0.0:{port}...")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

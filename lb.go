@@ -77,8 +77,8 @@ func main() {
 	var threshold int64
 	var checkInterval int
 
-	flag.StringVar(&backendList, "backends", "http://127.0.0.1:5000", "Comma separated backends (e.g., http://10.1.75.79:5000,http://10.1.75.79:5002)")
-	flag.StringVar(&listenPort, "port", "8080", "Port to listen on (e.g., 8080 or 3000)")
+	flag.StringVar(&backendList, "backends", "http://10.1.75.79:5246,http://10.1.75.79:5247,http://10.1.75.79:5248", "Comma separated backends")
+	flag.StringVar(&listenPort, "port", "8000", "Port to listen on")
 	flag.Int64Var(&threshold, "threshold", 8, "Dynamic load switching threshold (active concurrency / load score)")
 	flag.IntVar(&checkInterval, "health-interval", 1, "Health check interval in seconds")
 	flag.Parse()
