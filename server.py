@@ -395,5 +395,10 @@ def index():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    try:
+        from werkzeug.serving import BaseWSGIServer
+        BaseWSGIServer.request_queue_size = 4096
+    except Exception:
+        pass
     from werkzeug.serving import run_simple
     run_simple("0.0.0.0", port, app, threaded=True)
