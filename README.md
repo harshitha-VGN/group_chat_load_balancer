@@ -107,9 +107,3 @@ Plots will be automatically saved in the `plots/` directory:
 - `plots/system_utilization_all_4_systems.png`
 - `plots/dynamic_lb_traffic_distribution.png`
 
----
-
-## Leaderboard Submission
-
-- **Roll ID**: Your Roll Number
-- **Load Balancer URL**: `http://10.1.75.79:6245`
