@@ -61,7 +61,7 @@ KEY_FILE = os.path.join(BASE_DIR, "secret.key")
 KEYS_DIR = os.path.join(BASE_DIR, "keys")
 os.makedirs(KEYS_DIR, exist_ok=True)
 
-CENTRAL_DB_URL = os.environ.get("CENTRAL_DB_URL", "http://10.1.75.79:5245").rstrip("/")
+CENTRAL_DB_URL = os.environ.get("CENTRAL_DB_URL", "http://10.1.75.79:6245").rstrip("/")
 
 # ─── In-Memory State ───
 connected_users: dict[str, dict] = {}        # sid -> {"username": str}
@@ -109,13 +109,9 @@ conn.commit()
 SHARED_AES_KEY_B64 = os.environ.get("AES_KEY_B64", "")
 if SHARED_AES_KEY_B64:
     AES_KEY = base64.b64decode(SHARED_AES_KEY_B64)
-elif os.path.exists(KEY_FILE):
-    with open(KEY_FILE, "rb") as f:
-        AES_KEY = f.read()
 else:
-    AES_KEY = AESGCM.generate_key(bit_length=256)
-    with open(KEY_FILE, "wb") as f:
-        f.write(AES_KEY)
+    # Consistent shared symmetric key derived from SECRET_KEY
+    AES_KEY = hashlib.sha256(app.config["SECRET_KEY"].encode("utf-8") + b":aes256_shared_room_key").digest()
 
 aesgcm = AESGCM(AES_KEY)
 
