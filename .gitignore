@@ -26,3 +26,5 @@ lb
 repo_src/
 .DS_Store
 load_generator.py
+lb.go
+db_service.py
