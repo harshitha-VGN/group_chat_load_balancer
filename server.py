@@ -183,20 +183,61 @@ def init_db():
 conn = init_db()
 
 
-# ─── Peer Replication Mechanism ───
-def broadcast_to_peers(msg_record: dict):
-    """Asynchronously syncs message to other 2 backend peers in background thread"""
-    my_port = os.environ.get("PORT", "5000")
-    for peer_url in ALL_PEERS:
-        # Don't replicate to self
-        if f":524" in peer_url:
+# ─── High-Throughput Queue Workers (Zero Thread Spawning Overhead) ───
+import queue
+
+db_queue = queue.Queue(maxsize=100000)
+peer_queue = queue.Queue(maxsize=100000)
+
+
+def db_writer_worker():
+    """Single dedicated background thread for batch SQLite disk persistence"""
+    batch = []
+    while True:
+        try:
+            item = db_queue.get(timeout=0.05)
+            batch.append(item)
+            while len(batch) < 50:
+                try:
+                    item = db_queue.get_nowait()
+                    batch.append(item)
+                except queue.Empty:
+                    break
+        except queue.Empty:
             pass
-        def send_peer(url=peer_url):
+
+        if batch:
+            with db_write_lock:
+                try:
+                    conn.executemany("""
+                        INSERT OR IGNORE INTO messages(message_id, room_id, sender, ciphertext, nonce, signature, timestamp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, batch)
+                    conn.commit()
+                except Exception:
+                    pass
+            batch.clear()
+
+
+def peer_sync_worker():
+    """Dedicated background workers for non-blocking peer replication"""
+    while True:
+        try:
+            msg_record = peer_queue.get(timeout=1.0)
+        except queue.Empty:
+            continue
+
+        for peer_url in ALL_PEERS:
             try:
-                peer_session.post(f"{url}/sync", json=msg_record, timeout=0.8)
+                peer_session.post(f"{peer_url}/sync", json=msg_record, timeout=0.5)
             except Exception:
                 pass
-        threading.Thread(target=send_peer, daemon=True).start()
+
+
+# Start permanent worker threads
+threading.Thread(target=db_writer_worker, daemon=True, name="db_writer").start()
+for i in range(3):
+    threading.Thread(target=peer_sync_worker, daemon=True, name=f"peer_worker_{i}").start()
 
 
 def append_message_to_state(msg_record: dict, replicate: bool = True):
@@ -209,7 +250,7 @@ def append_message_to_state(msg_record: dict, replicate: bool = True):
     ts = msg_record["timestamp"]
     room_id = msg_record.get("room_id", ROOM)
 
-    # 1. Instant Deduplication
+    # 1. Instant Deduplication & In-Memory Storage
     with cache_lock:
         if msg_id and msg_id in seen_message_ids:
             return False
@@ -228,23 +269,18 @@ def append_message_to_state(msg_record: dict, replicate: bool = True):
             "tampered": False,
         })
 
-    # 2. Asynchronous Disk Persistence
-    def persist():
-        with db_write_lock:
-            try:
-                conn.execute("""
-                    INSERT OR IGNORE INTO messages(message_id, room_id, sender, ciphertext, nonce, signature, timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (msg_id, room_id, client_name, ciphertext, nonce, signature, ts))
-                conn.commit()
-            except Exception:
-                pass
+    # 2. Queue for Disk Persistence (Zero thread spawn)
+    try:
+        db_queue.put_nowait((msg_id, room_id, client_name, ciphertext, nonce, signature, ts))
+    except queue.Full:
+        pass
 
-    threading.Thread(target=persist, daemon=True).start()
-
-    # 3. Asynchronously Replicate to Peers
+    # 3. Queue for Peer Replication (Zero thread spawn)
     if replicate:
-        broadcast_to_peers(msg_record)
+        try:
+            peer_queue.put_nowait(msg_record)
+        except queue.Full:
+            pass
 
     return True
 
