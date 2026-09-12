@@ -104,34 +104,27 @@ def decrypt_message(ciphertext_b64: str, nonce_b64: str) -> str:
     return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
 
 
-# ─── Fast Key Management (Ed25519) ───
+# ─── Fast Deterministic In-Memory Key Management (Ed25519) ───
+key_lock = threading.Lock()
+
 def get_or_create_keypair(username: str) -> Ed25519PrivateKey:
-    if username in signing_keys:
-        return signing_keys[username]
+    with key_lock:
+        if username in signing_keys:
+            return signing_keys[username]
 
-    path = os.path.join(KEYS_DIR, f"{username}.pem")
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            private_key = serialization.load_pem_private_key(f.read(), password=None)
-    else:
-        private_key = Ed25519PrivateKey.generate()
-        pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        with open(path, "wb") as f:
-            f.write(pem)
-
-    signing_keys[username] = private_key
-    cached_pubkeys[username] = private_key.public_key()
-    return private_key
+        # Fast deterministic key generation (zero disk I/O, perfectly consistent across all nodes)
+        seed = hashlib.sha256(app.config["SECRET_KEY"].encode("utf-8") + f":user_ed25519_key:{username}".encode("utf-8")).digest()
+        private_key = Ed25519PrivateKey.from_private_bytes(seed)
+        signing_keys[username] = private_key
+        cached_pubkeys[username] = private_key.public_key()
+        return private_key
 
 
 def sign_message(username: str, plaintext: str) -> str:
     keypair = get_or_create_keypair(username)
     signature = keypair.sign(plaintext.encode("utf-8"))
     return base64.b64encode(signature).decode("utf-8")
+
 
 
 # ─── Database Initialization ───
