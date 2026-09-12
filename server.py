@@ -326,19 +326,28 @@ def get_feed():
     return jsonify(feed_copy), 200
 
 
+connected_users: dict[str, dict] = {}
+
 @app.route("/health", methods=["GET"])
 def health():
-    cpu = psutil.cpu_percent(interval=None)
-    mem = psutil.virtual_memory().percent
+    try:
+        cpu = psutil.cpu_percent(interval=None)
+        mem = psutil.virtual_memory().percent
+    except Exception:
+        cpu, mem = 0.0, 0.0
+
     with active_requests_lock:
         conns = active_requests_counter
+
+    with cache_lock:
+        stored = len(feed_cache)
 
     return jsonify({
         "status": "ok",
         "cpu_percent": cpu,
         "memory_percent": mem,
         "active_requests": conns,
-        "stored_messages": len(feed_cache),
+        "stored_messages": stored,
         "connected_users": len(connected_users),
     }), 200
 
