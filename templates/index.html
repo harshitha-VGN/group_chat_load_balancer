@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lab Hub | Premium Real-Time Group Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg-dark: #070913;
+      --panel-bg: rgba(15, 23, 42, 0.75);
+      --glass-surface: rgba(255, 255, 255, 0.04);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      --glass-highlight: rgba(255, 255, 255, 0.15);
+      
+      --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+      --cyan-gradient: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+      --emerald-glow: rgba(16, 185, 129, 0.2);
+      
+      --primary: #818cf8;
+      --primary-bright: #6366f1;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --bubble-self-bg: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      --bubble-other-bg: rgba(30, 41, 59, 0.8);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Ambient Background Mesh Blobs */
+    .ambient-blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.35;
+      pointer-events: none;
+      z-index: 0;
+      animation: floatBlob 18s ease-in-out infinite alternate;
+    }
+
+    .blob-1 {
+      width: 500px;
+      height: 500px;
+      background: #4f46e5;
+      top: -100px;
+      left: -100px;
+    }
+
+    .blob-2 {
+      width: 600px;
+      height: 600px;
+      background: #c084fc;
+      bottom: -150px;
+      right: -100px;
+      animation-delay: -9s;
+    }
+
+    .blob-3 {
+      width: 400px;
+      height: 400px;
+      background: #00f2fe;
+      top: 40%;
+      left: 30%;
+      opacity: 0.2;
+    }
+
+    @keyframes floatBlob {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(60px, 40px) scale(1.1); }
+    }
+
+    /* Join Overlay Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 9, 19, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal-overlay.hidden {
+      opacity: 0;
+      transform: scale(0.95);
+      pointer-events: none;
+    }
+
+    .join-card {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--glass-highlight);
+      border-radius: 24px;
+      padding: 40px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--glass-highlight);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .join-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--accent-gradient);
+    }
+
+    .badge-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: var(--accent-gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      box-shadow: 0 10px 25px rgba(99, 102, 241, 0.4);
+    }
+
+    .badge-icon svg {
+      width: 28px;
+      height: 28px;
+      fill: #fff;
+    }
+
+    .join-card h1 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .join-card p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .input-wrapper {
+      position: relative;
+    }
+
+    .input-wrapper input {
+      width: 100%;
+      padding: 14px 18px;
+      border-radius: 14px;
+      border: 1px solid var(--glass-border);
+      background: rgba(7, 9, 19, 0.6);
+      color: var(--text-main);
+      font-size: 1rem;
+      outline: none;
+      transition: all 0.25s ease;
+    }
+
+    .input-wrapper input:focus {
+      border-color: var(--primary-bright);
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+      background: rgba(15, 23, 42, 0.9);
+    }
+
+    .btn-submit {
+      padding: 14px 24px;
+      border-radius: 14px;
+      border: none;
+      background: var(--accent-gradient);
+      color: #fff;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(99, 102, 241, 0.35);
+      transition: all 0.25s ease;
+    }
+
+    .btn-submit:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 15px 30px rgba(99, 102, 241, 0.5);
+    }
+
+    .btn-submit:active {
+      transform: translateY(0);
+    }
+
+    .error-msg {
+      color: #f87171;
+      font-size: 0.85rem;
+      margin-top: 10px;
+      min-height: 22px;
+      font-weight: 500;
+    }
+
+    /* Main App Container */
+    .app-container {
+      width: 92vw;
+      max-width: 1280px;
+      height: 88vh;
+      background: var(--panel-bg);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid var(--glass-highlight);
+      border-radius: 28px;
+      display: flex;
+      overflow: hidden;
+      box-shadow: 0 40px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      z-index: 10;
+    }
+
+    /* Left Sidebar */
+    .sidebar {
+      width: 300px;
+      background: rgba(7, 9, 19, 0.5);
+      border-right: 1px solid var(--glass-border);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--accent-gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: #fff;
+    }
+
+    .brand-title h2 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: #34d399;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      background: #34d399;
+      border-radius: 50%;
+      box-shadow: 0 0 10px #34d399;
+      animation: pulseGlow 1.8s infinite;
+    }
+
+    @keyframes pulseGlow {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.75); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    .members-label {
+      padding: 16px 24px 8px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+    }
+
+    .user-list {
+      flex: 1;
+      padding: 8px 16px 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .user-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+
+    .user-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: var(--glass-border);
+    }
+
+    .user-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .user-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .user-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .user-status-text {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .sidebar-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--glass-border);
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Main Chat Window */
+    .chat-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: rgba(15, 23, 42, 0.3);
+    }
+
+    .chat-header {
+      padding: 20px 28px;
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(7, 9, 19, 0.2);
+    }
+
+    .room-title h3 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .room-title h3 span {
+      color: var(--primary);
+    }
+
+    .room-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .me-pill {
+      font-size: 0.82rem;
+      padding: 6px 14px;
+      border-radius: 20px;
+      background: rgba(129, 140, 248, 0.1);
+      border: 1px solid rgba(129, 140, 248, 0.25);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .messages-area {
+      flex: 1;
+      padding: 28px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Notification Pill */
+    .system-notification {
+      align-self: center;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--glass-border);
+      padding: 6px 18px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Message Bubbles */
+    .message-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 62%;
+      animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .message-row.self {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .message-row.other {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+
+    .message-meta {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      display: flex;
+      gap: 8px;
+      font-weight: 500;
+    }
+
+    .message-bubble {
+      padding: 13px 18px;
+      border-radius: 18px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    .message-row.self .message-bubble {
+      background: var(--bubble-self-bg);
+      border-bottom-right-radius: 4px;
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .message-row.other .message-bubble {
+      background: var(--bubble-other-bg);
+      border-bottom-left-radius: 4px;
+      color: var(--text-main);
+      border: 1px solid var(--glass-border);
+    }
+
+    /* Typing Indicator Bar */
+    .typing-bar {
+      padding: 4px 28px 8px;
+      font-size: 0.8rem;
+      color: var(--primary);
+      font-weight: 500;
+      font-style: italic;
+      min-height: 24px;
+    }
+
+    /* Input Footer */
+    .chat-footer {
+      padding: 20px 28px;
+      border-top: 1px solid var(--glass-border);
+      background: rgba(7, 9, 19, 0.3);
+    }
+
+    .input-form {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .input-form input {
+      flex: 1;
+      padding: 16px 22px;
+      border-radius: 16px;
+      border: 1px solid var(--glass-border);
+      background: rgba(7, 9, 19, 0.6);
+      color: var(--text-main);
+      font-size: 0.98rem;
+      outline: none;
+      transition: all 0.25s ease;
+    }
+
+    .input-form input:focus {
+      border-color: var(--primary-bright);
+      box-shadow: 0 0 25px rgba(99, 102, 241, 0.25);
+      background: rgba(15, 23, 42, 0.8);
+    }
+
+    .btn-send {
+      padding: 16px 26px;
+      border-radius: 16px;
+      border: none;
+      background: var(--accent-gradient);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(99, 102, 241, 0.35);
+      transition: all 0.2s ease;
+    }
+
+    .btn-send:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 25px rgba(99, 102, 241, 0.5);
+    }
+
+    .btn-send:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Background Ambient Glow Blobs -->
+  <div class="ambient-blob blob-1"></div>
+  <div class="ambient-blob blob-2"></div>
+  <div class="ambient-blob blob-3"></div>
+
+  <!-- Join Modal Overlay -->
+  <div class="modal-overlay" id="joinModal">
+    <div class="join-card">
+      <div class="badge-icon">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
+      </div>
+      <h1>Group Chat Room</h1>
+      <p>Enter your username to connect with teammates across laboratory machines</p>
+      <form id="joinForm" onsubmit="handleJoin(event)">
+        <div class="input-group">
+          <div class="input-wrapper">
+            <input type="text" id="usernameInput" placeholder="Enter your username..." maxlength="20" required autofocus>
+          </div>
+          <button type="submit" class="btn-submit">Join Common Room</button>
+        </div>
+        <div class="error-msg" id="joinError"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- App Interface -->
+  <div class="app-container">
+    <!-- Left Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-title">
+          <div class="brand-logo">GC</div>
+          <h2>Lab Chat</h2>
+        </div>
+        <div class="status-badge">
+          <div class="pulse-dot"></div>
+          <span id="userCount">0</span> Online
+        </div>
+      </div>
+
+      <div class="members-label">Active Members</div>
+      <div class="user-list" id="userList"></div>
+
+      <div class="sidebar-footer">
+        <span>WebSocket Active</span>
+        <span>Port 5000</span>
+      </div>
+    </div>
+
+    <!-- Main Chat Window -->
+    <div class="chat-main">
+      <div class="chat-header">
+        <div class="room-title">
+          <h3><span>#</span> general-chat</h3>
+          <div class="room-desc">Real-time multi-client communication server</div>
+        </div>
+        <div class="me-pill" id="myUsernameDisplay">Not Connected</div>
+      </div>
+
+      <div class="messages-area" id="messagesArea">
+        <div class="system-notification">Welcome to the Common Lab Chat Room. Connect up to 4 users simultaneously.</div>
+      </div>
+
+      <div class="typing-bar" id="typingDisplay"></div>
+
+      <div class="chat-footer">
+        <form class="input-form" id="messageForm" onsubmit="handleSendMessage(event)">
+          <input type="text" id="messageInput" placeholder="Type a message to the group..." autocomplete="off" disabled>
+          <button type="submit" class="btn-send" id="sendBtn" disabled>Send</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let socket;
+    let myUsername = "";
+    let typingTimeout;
+
+    // Palette generator for avatars
+    const avatarGradients = [
+      'linear-gradient(135deg, #6366f1, #a855f7)',
+      'linear-gradient(135deg, #06b6d4, #3b82f6)',
+      'linear-gradient(135deg, #10b981, #059669)',
+      'linear-gradient(135deg, #f59e0b, #d97706)',
+      'linear-gradient(135deg, #ec4899, #8b5cf6)',
+      'linear-gradient(135deg, #f43f5e, #e11d48)'
+    ];
+
+    function getAvatarGradient(name) {
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const index = Math.abs(hash) % avatarGradients.length;
+      return avatarGradients[index];
+    }
+
+    // Connect WebSocket
+    socket = io();
+
+    socket.on("error", (data) => {
+      document.getElementById("joinError").innerText = data.message;
+    });
+
+    socket.on("joined", (data) => {
+      myUsername = data.username;
+      document.getElementById("joinModal").classList.add("hidden");
+      document.getElementById("messageInput").disabled = false;
+      document.getElementById("sendBtn").disabled = false;
+      document.getElementById("messageInput").focus();
+      document.getElementById("myUsernameDisplay").innerText = `@${myUsername}`;
+      updateUsers(data.users);
+    });
+
+    socket.on("user_joined", (data) => {
+      addSystemNotification(`${data.username} joined the chat`);
+      updateUsers(data.users);
+    });
+
+    socket.on("user_left", (data) => {
+      addSystemNotification(`${data.username} left the chat`);
+      updateUsers(data.users);
+    });
+
+    socket.on("message", (data) => {
+      appendMessage(data);
+    });
+
+    socket.on("history", (data) => {
+      // Persistence: render decrypted + signature-verified chat history on join
+      (data.messages || []).forEach(msg => appendMessage(msg, true));
+    });
+
+    socket.on("typing", (data) => {
+      const display = document.getElementById("typingDisplay");
+      if (data.is_typing) {
+        display.innerText = `${data.username} is typing...`;
+      } else {
+        display.innerText = "";
+      }
+    });
+
+    function handleJoin(e) {
+      e.preventDefault();
+      const name = document.getElementById("usernameInput").value.trim();
+      if (!name) return;
+      document.getElementById("joinError").innerText = "";
+      socket.emit("join", { username: name });
+    }
+
+    function handleSendMessage(e) {
+      e.preventDefault();
+      const input = document.getElementById("messageInput");
+      const text = input.value.trim();
+      if (!text) return;
+
+      socket.emit("message", { text: text });
+      socket.emit("typing", { is_typing: false });
+      input.value = "";
+    }
+
+    const msgInput = document.getElementById("messageInput");
+    msgInput.addEventListener("input", () => {
+      socket.emit("typing", { is_typing: true });
+      clearTimeout(typingTimeout);
+      typingTimeout = setTimeout(() => {
+        socket.emit("typing", { is_typing: false });
+      }, 1500);
+    });
+
+    function updateUsers(users) {
+      document.getElementById("userCount").innerText = users.length;
+      const list = document.getElementById("userList");
+      list.innerHTML = "";
+
+      users.forEach(u => {
+        const item = document.createElement("div");
+        item.className = "user-item";
+        const initial = u.charAt(0).toUpperCase();
+        const bgGradient = getAvatarGradient(u);
+        const isMe = u === myUsername;
+
+        item.innerHTML = `
+          <div class="user-avatar" style="background: ${bgGradient}">${initial}</div>
+          <div class="user-info">
+            <span class="user-name">${escapeHtml(u)} ${isMe ? '(You)' : ''}</span>
+            <span class="user-status-text">Connected</span>
+          </div>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    function addSystemNotification(text) {
+      const area = document.getElementById("messagesArea");
+      const notif = document.createElement("div");
+      notif.className = "system-notification";
+      notif.innerText = text;
+      area.appendChild(notif);
+      area.scrollTop = area.scrollHeight;
+    }
+
+    function appendMessage(data, fromHistory = false) {
+      const area = document.getElementById("messagesArea");
+      const row = document.createElement("div");
+      const isSelf = data.username === myUsername;
+
+      const tampered = !!data.tampered;
+      const sigValid = data.signature_valid !== false;
+
+      let badge = "";
+      if (tampered) {
+        badge = `<span style="color:#f87171;font-size:0.72rem;font-weight:700;">TAMPER DETECTED</span>`;
+      } else if (sigValid) {
+        badge = "";
+      } else {
+        badge = `<span style="color:#f87171;font-size:0.72rem;font-weight:700;">signature INVALID</span>`;
+      }
+
+      row.className = `message-row ${isSelf ? 'self' : 'other'}`;
+      row.innerHTML = `
+        <div class="message-meta">
+          <span>${isSelf ? 'You' : escapeHtml(data.username)}</span>
+          <span>${data.timestamp}</span>
+        </div>
+        <div class="message-bubble" style="${tampered ? 'border:1px solid #f87171;' : ''}">${escapeHtml(data.text)}</div>
+        <div class="message-meta" style="margin-top:2px;">${badge}</div>
+      `;
+
+      area.appendChild(row);
+      area.scrollTop = area.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.innerText = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local Databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# Keys and Secrets
+keys/
+*.pem
+*.key
+secret.key
+
+# Compiled Go Binaries
+lb
+*.exe
+
+# Logs
+*.log
+
+# Scratch / Cloned Temporary Repos
+repo_src/
+.DS_Store
