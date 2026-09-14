@@ -281,12 +281,16 @@ for _peer_url in ACTIVE_PEERS:
 
 
 def startup_peer_pull():
-    """On startup, pull full message history from peers to catch up on any missed messages."""
+    """On startup, pull from peers only if local database was empty"""
     import time as _time
-    _time.sleep(4)  # Wait for this server to be fully up first
-    for peer_url in ALL_PEERS:
+    _time.sleep(5)
+    with cache_lock:
+        if len(feed_cache) > 100:
+            return  # Already populated from local SQLite DB, avoid 15MB HTTP spike
+
+    for peer_url in ACTIVE_PEERS:
         try:
-            resp = peer_session.get(f"{peer_url}/full_feed", timeout=15.0)
+            resp = peer_session.get(f"{peer_url}/full_feed", timeout=10.0)
             if resp.status_code != 200:
                 continue
             records = resp.json()
@@ -296,11 +300,9 @@ def startup_peer_pull():
             for record in records:
                 if append_message_to_state(record, replicate=False):
                     inserted += 1
-            log.error(f"[STARTUP PULL] Synced {inserted} missing messages from {peer_url}")
             if inserted > 0:
-                break  # Successfully pulled from one peer
-        except Exception as e:
-            log.error(f"[STARTUP PULL] Failed from {peer_url}: {e}")
+                break
+        except Exception:
             continue
 
 
