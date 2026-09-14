@@ -191,7 +191,8 @@ conn = init_db()
 import queue
 
 db_queue = queue.Queue(maxsize=100000)
-peer_queue = queue.Queue(maxsize=100000)
+# Per-peer queues: one dedicated queue per backend for zero-contention parallel sync
+peer_queues = {peer: queue.Queue(maxsize=100000) for peer in ALL_PEERS}
 
 
 def db_writer_worker():
@@ -223,36 +224,32 @@ def db_writer_worker():
             batch.clear()
 
 
-def peer_sync_worker():
-    """Dedicated background workers for non-blocking peer replication with parallel sync"""
-    import concurrent.futures as _cf
-    def sync_to_peer(peer_url, msg_record):
+def single_peer_worker(peer_url):
+    """Dedicated worker for a single peer — no lock contention, maximum throughput"""
+    q = peer_queues[peer_url]
+    while True:
+        try:
+            msg_record = q.get(timeout=1.0)
+        except queue.Empty:
+            continue
         for attempt in range(3):
             try:
                 r = peer_session.post(f"{peer_url}/sync", json=msg_record, timeout=1.5)
                 if r.status_code == 200:
-                    return True
+                    break
             except Exception:
                 pass
             if attempt < 2:
                 import time as _t
                 _t.sleep(0.02 * (attempt + 1))
-        return False
-
-    while True:
-        try:
-            msg_record = peer_queue.get(timeout=1.0)
-        except queue.Empty:
-            continue
-        # Send to all peers in parallel
-        with _cf.ThreadPoolExecutor(max_workers=len(ALL_PEERS)) as _ex:
-            _ex.map(lambda p: sync_to_peer(p, msg_record), ALL_PEERS)
 
 
 # Start permanent worker threads
 threading.Thread(target=db_writer_worker, daemon=True, name="db_writer").start()
-for i in range(20):  # 20 workers for high-throughput parallel peer sync
-    threading.Thread(target=peer_sync_worker, daemon=True, name=f"peer_worker_{i}").start()
+# 10 dedicated workers per peer for high parallel throughput
+for _peer_url in ALL_PEERS:
+    for i in range(10):
+        threading.Thread(target=single_peer_worker, args=(_peer_url,), daemon=True, name=f"peer_{_peer_url[-4:]}_{i}").start()
 
 
 def startup_peer_pull():
@@ -327,12 +324,13 @@ def append_message_to_state(msg_record: dict, replicate: bool = True):
     except queue.Full:
         pass
 
-    # 3. Queue for Peer Replication (Zero thread spawn)
+    # 3. Queue for Peer Replication — push to each peer's dedicated queue
     if replicate:
-        try:
-            peer_queue.put_nowait(msg_record)
-        except queue.Full:
-            pass
+        for _p, _q in peer_queues.items():
+            try:
+                _q.put_nowait(msg_record)
+            except queue.Full:
+                pass
 
     return True
 
