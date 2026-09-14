@@ -503,9 +503,8 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     try:
-        from werkzeug.serving import BaseWSGIServer, WSGIRequestHandler
+        from werkzeug.serving import BaseWSGIServer
         BaseWSGIServer.request_queue_size = 8192
-        WSGIRequestHandler.protocol_version = "HTTP/1.1"
     except Exception:
         pass
     from werkzeug.serving import run_simple
