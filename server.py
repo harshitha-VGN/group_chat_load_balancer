@@ -17,6 +17,7 @@ import logging
 import sqlite3
 import threading
 import uuid
+import time as _pytime
 from datetime import datetime
 
 import requests
@@ -307,7 +308,6 @@ def append_message_to_state(msg_record: dict, replicate: bool = True):
         if msg_id:
             seen_message_ids.add(msg_id)
         feed_cache.append(feed_item)
-        cached_feed_count = -1
 
     # 2. Queue for Disk Persistence (Zero thread spawn)
     try:
@@ -449,18 +449,22 @@ def sync_peer():
     return jsonify({"status": "ok"}), 200
 
 
+cached_feed_time = 0
+
 @app.route("/feed", methods=["GET"])
 def get_feed():
-    """Instant < 1ms feed retrieval of all stored messages with fast JSON caching"""
-    global cached_feed_json, cached_feed_count
+    """Instant < 1ms feed retrieval with time-throttled JSON caching to prevent OOM spikes"""
+    global cached_feed_json, cached_feed_count, cached_feed_time
+    now = _pytime.time()
     with cache_lock:
         current_len = len(feed_cache)
-        if current_len == cached_feed_count and cached_feed_json is not None:
+        if cached_feed_json is not None and (current_len == cached_feed_count or (now - cached_feed_time) < 2.0):
             data = cached_feed_json
         else:
             data = json.dumps(feed_cache).encode("utf-8")
             cached_feed_json = data
             cached_feed_count = current_len
+            cached_feed_time = now
     return Response(data, status=200, mimetype="application/json")
 
 
