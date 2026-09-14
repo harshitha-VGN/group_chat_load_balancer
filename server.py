@@ -267,7 +267,7 @@ def startup_peer_pull():
                 if append_message_to_state(record, replicate=False):
                     inserted += 1
             log.error(f"[STARTUP PULL] Synced {inserted} missing messages from {peer_url}")
-            if inserted >= 0:
+            if inserted > 0:
                 break  # Successfully pulled from one peer
         except Exception as e:
             log.error(f"[STARTUP PULL] Failed from {peer_url}: {e}")
