@@ -72,7 +72,8 @@ peer_session.mount("http://", adapter)
 peer_session.mount("https://", adapter)
 
 # ─── In-Memory Storage & Fast Caches ───
-feed_cache = []
+feed_cache = []            # Public feed (decrypted, for /feed endpoint)
+full_feed_cache = []       # Full records (with ciphertext) for /full_feed peer sync
 seen_message_ids = set()
 signing_keys: dict[str, Ed25519PrivateKey] = {}
 cached_pubkeys: dict[str, Ed25519PublicKey] = {}
@@ -169,6 +170,16 @@ def init_db():
             "signature_valid": True,
             "tampered": False,
         })
+        full_feed_cache.append({
+            "id": msg_id,
+            "client-name": sender,
+            "msg": text,
+            "ciphertext": r[4],
+            "nonce": r[5],
+            "signature": r[6],
+            "timestamp": ts_raw,
+            "room_id": r[2] or ROOM,
+        })
         if msg_id:
             seen_message_ids.add(msg_id)
     return conn
@@ -213,7 +224,7 @@ def db_writer_worker():
 
 
 def peer_sync_worker():
-    """Dedicated background workers for non-blocking peer replication"""
+    """Dedicated background workers for non-blocking peer replication with retry"""
     while True:
         try:
             msg_record = peer_queue.get(timeout=1.0)
@@ -221,16 +232,49 @@ def peer_sync_worker():
             continue
 
         for peer_url in ALL_PEERS:
-            try:
-                peer_session.post(f"{peer_url}/sync", json=msg_record, timeout=0.5)
-            except Exception:
-                pass
+            for attempt in range(3):
+                try:
+                    r = peer_session.post(f"{peer_url}/sync", json=msg_record, timeout=1.5)
+                    if r.status_code == 200:
+                        break
+                except Exception:
+                    pass
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(0.05 * (attempt + 1))
 
 
 # Start permanent worker threads
 threading.Thread(target=db_writer_worker, daemon=True, name="db_writer").start()
 for i in range(3):
     threading.Thread(target=peer_sync_worker, daemon=True, name=f"peer_worker_{i}").start()
+
+
+def startup_peer_pull():
+    """On startup, pull full message history from peers to catch up on any missed messages."""
+    import time as _time
+    _time.sleep(4)  # Wait for this server to be fully up first
+    for peer_url in ALL_PEERS:
+        try:
+            resp = peer_session.get(f"{peer_url}/full_feed", timeout=15.0)
+            if resp.status_code != 200:
+                continue
+            records = resp.json()
+            if not isinstance(records, list) or len(records) == 0:
+                continue
+            inserted = 0
+            for record in records:
+                if append_message_to_state(record, replicate=False):
+                    inserted += 1
+            log.error(f"[STARTUP PULL] Synced {inserted} missing messages from {peer_url}")
+            if inserted >= 0:
+                break  # Successfully pulled from one peer
+        except Exception as e:
+            log.error(f"[STARTUP PULL] Failed from {peer_url}: {e}")
+            continue
+
+
+threading.Thread(target=startup_peer_pull, daemon=True, name="startup_pull").start()
 
 
 def append_message_to_state(msg_record: dict, replicate: bool = True):
@@ -260,6 +304,16 @@ def append_message_to_state(msg_record: dict, replicate: bool = True):
             "timestamp": ts,
             "signature_valid": True,
             "tampered": False,
+        })
+        full_feed_cache.append({
+            "id": msg_id,
+            "client-name": client_name,
+            "msg": msg_text,
+            "ciphertext": msg_record.get("ciphertext", ""),
+            "nonce": msg_record.get("nonce", ""),
+            "signature": msg_record.get("signature", ""),
+            "timestamp": ts,
+            "room_id": msg_record.get("room_id", ROOM),
         })
 
     # 2. Queue for Disk Persistence (Zero thread spawn)
@@ -353,6 +407,14 @@ def get_feed():
     with cache_lock:
         feed_copy = list(feed_cache)
     return jsonify(feed_copy), 200
+
+
+@app.route("/full_feed", methods=["GET"])
+def get_full_feed():
+    """Internal endpoint: returns full records (with ciphertext) for peer startup sync"""
+    with cache_lock:
+        full_copy = list(full_feed_cache)
+    return jsonify(full_copy), 200
 
 
 connected_users: dict[str, dict] = {}
