@@ -92,7 +92,6 @@ peer_session.mount("https://", adapter)
 
 # ─── In-Memory Storage & Fast Caches ───
 feed_cache = []            # Public feed (decrypted, for /feed endpoint)
-full_feed_cache = []       # Full records (with ciphertext) for /full_feed peer sync
 seen_message_ids = set()
 signing_keys: dict[str, Ed25519PrivateKey] = {}
 cached_pubkeys: dict[str, Ed25519PublicKey] = {}
@@ -197,17 +196,6 @@ def init_db():
             "signature_valid": True,
             "tampered": False,
         })
-        full_feed_cache.append({
-            "id": msg_id,
-            "message_id": msg_id,
-            "client-name": sender,
-            "msg": text,
-            "ciphertext": r[4],
-            "nonce": r[5],
-            "signature": r[6],
-            "timestamp": ts_raw,
-            "room_id": r[2] or ROOM,
-        })
         if msg_id:
             seen_message_ids.add(msg_id)
     return conn
@@ -281,32 +269,7 @@ for _peer_url in ACTIVE_PEERS:
 
 
 def startup_peer_pull():
-    """On startup, pull from peers only if local database was empty"""
-    import time as _time
-    _time.sleep(5)
-    with cache_lock:
-        if len(feed_cache) > 100:
-            return  # Already populated from local SQLite DB, avoid 15MB HTTP spike
-
-    for peer_url in ACTIVE_PEERS:
-        try:
-            resp = peer_session.get(f"{peer_url}/full_feed", timeout=10.0)
-            if resp.status_code != 200:
-                continue
-            records = resp.json()
-            if not isinstance(records, list) or len(records) == 0:
-                continue
-            inserted = 0
-            for record in records:
-                if append_message_to_state(record, replicate=False):
-                    inserted += 1
-            if inserted > 0:
-                break
-        except Exception:
-            continue
-
-
-threading.Thread(target=startup_peer_pull, daemon=True, name="startup_pull").start()
+    pass
 
 
 def append_message_to_state(msg_record: dict, replicate: bool = True):
@@ -337,18 +300,6 @@ def append_message_to_state(msg_record: dict, replicate: bool = True):
         "signature_valid": True,
         "tampered": False,
     }
-    full_item = {
-        "id": msg_id,
-        "message_id": msg_id,
-        "client-name": client_name,
-        "msg": msg_text,
-        "ciphertext": ciphertext,
-        "nonce": nonce,
-        "signature": signature,
-        "timestamp": ts,
-        "room_id": room_id,
-    }
-
     # 1. Instant Deduplication & In-Memory Storage
     with cache_lock:
         if msg_id and msg_id in seen_message_ids:
@@ -356,7 +307,6 @@ def append_message_to_state(msg_record: dict, replicate: bool = True):
         if msg_id:
             seen_message_ids.add(msg_id)
         feed_cache.append(feed_item)
-        full_feed_cache.append(full_item)
         cached_feed_count = -1
 
     # 2. Queue for Disk Persistence (Zero thread spawn)
@@ -516,10 +466,7 @@ def get_feed():
 
 @app.route("/full_feed", methods=["GET"])
 def get_full_feed():
-    """Internal endpoint: returns full records (with ciphertext) for peer startup sync"""
-    with cache_lock:
-        full_copy = list(full_feed_cache)
-    return jsonify(full_copy), 200
+    return jsonify([]), 200
 
 
 connected_users: dict[str, dict] = {}
