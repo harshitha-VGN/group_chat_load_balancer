@@ -224,29 +224,34 @@ def db_writer_worker():
 
 
 def peer_sync_worker():
-    """Dedicated background workers for non-blocking peer replication with retry"""
+    """Dedicated background workers for non-blocking peer replication with parallel sync"""
+    import concurrent.futures as _cf
+    def sync_to_peer(peer_url, msg_record):
+        for attempt in range(3):
+            try:
+                r = peer_session.post(f"{peer_url}/sync", json=msg_record, timeout=1.5)
+                if r.status_code == 200:
+                    return True
+            except Exception:
+                pass
+            if attempt < 2:
+                import time as _t
+                _t.sleep(0.02 * (attempt + 1))
+        return False
+
     while True:
         try:
             msg_record = peer_queue.get(timeout=1.0)
         except queue.Empty:
             continue
-
-        for peer_url in ALL_PEERS:
-            for attempt in range(3):
-                try:
-                    r = peer_session.post(f"{peer_url}/sync", json=msg_record, timeout=1.5)
-                    if r.status_code == 200:
-                        break
-                except Exception:
-                    pass
-                if attempt < 2:
-                    import time as _time
-                    _time.sleep(0.05 * (attempt + 1))
+        # Send to all peers in parallel
+        with _cf.ThreadPoolExecutor(max_workers=len(ALL_PEERS)) as _ex:
+            _ex.map(lambda p: sync_to_peer(p, msg_record), ALL_PEERS)
 
 
 # Start permanent worker threads
 threading.Thread(target=db_writer_worker, daemon=True, name="db_writer").start()
-for i in range(3):
+for i in range(20):  # 20 workers for high-throughput parallel peer sync
     threading.Thread(target=peer_sync_worker, daemon=True, name=f"peer_worker_{i}").start()
 
 
